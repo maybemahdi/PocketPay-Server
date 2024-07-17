@@ -10,7 +10,11 @@ const port = process.env.PORT || 5000;
 
 // middleware
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:5174"],
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "https://6d61-103-109-96-34.ngrok-free.app",
+  ],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -53,6 +57,7 @@ async function run() {
     // await client.connect();
     const db = client.db(`${process.env.DB_USER}`);
     const userCollection = db.collection("users");
+    const transactionCollection = db.collection("transactions");
 
     //create user - registration
     app.post("/users", async (req, res) => {
@@ -99,7 +104,7 @@ async function run() {
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: "1h",
+        expiresIn: "365d",
       });
       res
         .cookie("token", token, {
@@ -126,11 +131,92 @@ async function run() {
       }
     });
 
+    //get user by phone
+    app.get("/users/:phone", async (req, res) => {
+      const { phone } = req?.params;
+      const result = await userCollection.findOne(
+        { phone },
+        { projection: { _id: 0 } }
+      );
+      res.send(result);
+    });
+
     // get user role
     app.get("/role/:email", async (req, res) => {
       const { email } = req?.params;
       const { role } = await userCollection.findOne({ email });
       res.send(role);
+    });
+
+    // send money
+    app.put("/sendMoney", verifyToken, async (req, res) => {
+      const data = req?.body;
+      const validUser = await userCollection.findOne({
+        phone: data?.accountNumber,
+      });
+      if (!validUser) {
+        return res.send({ errorMessage: "Invalid User" });
+      }
+      const isMatch = await bcrypt.compare(data?.pin, validUser.pin);
+      if (!isMatch) {
+        return res.send({ errorMessage: "Wrong Pin" });
+      }
+      const updateReceiverBalance = {
+        $inc: {
+          balance: data?.amount,
+        },
+      };
+      const updateSenderBalance = {
+        $inc: {
+          balance: -data?.totalPayAmount,
+        },
+      };
+      await userCollection.updateOne(
+        { phone: data?.accountNumber },
+        updateReceiverBalance
+      );
+      await userCollection.updateOne(
+        { phone: data?.sender },
+        updateSenderBalance
+      );
+      await transactionCollection.insertOne({ ...data, type: "sendMoney" });
+      res.send({ message: "Send Money Successful" });
+    });
+
+    //cash out
+    app.put("/cashOut", verifyToken, async (req, res) => {
+      const data = req?.body;
+      const validUser = await userCollection.findOne({
+        phone: data?.accountNumber,
+        accountType: "agent",
+      });
+      if (!validUser) {
+        return res.send({ errorMessage: "Enter a valid agent number" });
+      }
+      const isMatch = await bcrypt.compare(data?.pin, validUser.pin);
+      if (!isMatch) {
+        return res.send({ errorMessage: "Wrong Pin" });
+      }
+      const updateReceiverBalance = {
+        $inc: {
+          balance: data?.amount,
+        },
+      };
+      const updateSenderBalance = {
+        $inc: {
+          balance: -data?.totalPayAmount,
+        },
+      };
+      await userCollection.updateOne(
+        { phone: data?.accountNumber },
+        updateReceiverBalance
+      );
+      await userCollection.updateOne(
+        { phone: data?.sender },
+        updateSenderBalance
+      );
+      await transactionCollection.insertOne({ ...data, type: "cashOut" });
+      res.send({ message: "Cash Out Successful" });
     });
 
     // Send a ping to confirm a successful connection
