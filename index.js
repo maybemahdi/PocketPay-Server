@@ -58,6 +58,7 @@ async function run() {
     const db = client.db(`${process.env.DB_USER}`);
     const userCollection = db.collection("users");
     const transactionCollection = db.collection("transactions");
+    const cashInRequestCollection = db.collection("cashInRequests");
 
     //create user - registration
     app.post("/users", async (req, res) => {
@@ -81,12 +82,14 @@ async function run() {
 
     //sign in user - login
     app.get("/users", async (req, res) => {
-      const { phone, pin } = req?.query;
+      const { phoneOrEmail, pin } = req?.query;
       // Find user by username
-      const user = await userCollection.findOne(
-        { phone },
-        { projection: { _id: 0 } }
-      );
+      const query = {
+        $or: [{ phone: phoneOrEmail }, { email: phoneOrEmail }],
+      };
+      const user = await userCollection.findOne(query, {
+        projection: { _id: 0 },
+      });
       if (!user) {
         return res.send({ errorMessage: "Invalid credentials" });
       }
@@ -217,6 +220,28 @@ async function run() {
       );
       await transactionCollection.insertOne({ ...data, type: "cashOut" });
       res.send({ message: "Cash Out Successful" });
+    });
+
+    // cash in req to agent
+    app.post("/cashInReq", verifyToken, async (req, res) => {
+      const data = req?.body;
+      const validUser = await userCollection.findOne({
+        phone: data?.accountNumber,
+        accountType: "agent",
+      });
+      if (!validUser) {
+        return res.send({ errorMessage: "Enter a valid agent number" });
+      }
+      const isMatch = await bcrypt.compare(data?.pin, validUser.pin);
+      if (!isMatch) {
+        return res.send({ errorMessage: "Wrong Pin" });
+      }
+      const result = await cashInRequestCollection.insertOne({
+        ...data,
+        status: "pending",
+        timestamp: Date.now(),
+      });
+      res.send({ ...result, agent: validUser?.name });
     });
 
     // Send a ping to confirm a successful connection
