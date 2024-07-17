@@ -18,6 +18,23 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
+// Verify Token Middleware
+const verifyToken = async (req, res, next) => {
+  const token = req.cookies?.token;
+  // console.log(token);
+  if (!token) {
+    return res.status(401).send({ message: "unauthorized access" });
+  }
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      console.log(err);
+      return res.status(401).send({ message: "unauthorized access" });
+    }
+    req.user = decoded;
+    next();
+  });
+};
+
 const { MongoClient, ServerApiVersion } = require("mongodb");
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.nrdgddr.mongodb.net/?appName=Cluster0`;
 
@@ -37,21 +54,83 @@ async function run() {
     const db = client.db(`${process.env.DB_USER}`);
     const userCollection = db.collection("users");
 
+    //create user - registration
     app.post("/users", async (req, res) => {
       const userInfo = req.body;
-      const {pin} = userInfo
+      const { pin } = userInfo;
       // Generate salt and hash the password
       const salt = await bcrypt.genSalt(10);
       const hashedPin = await bcrypt.hash(pin, salt);
       const isExist = await userCollection.findOne({
-        email: userInfo?.email,
-        phone: userInfo?.phone,
+        $or: [{ email: userInfo?.email }, { phone: userInfo?.phone }],
       });
       if (isExist) {
         return res.send({ message: "User Already Exist" });
       }
-      const result = await userCollection.insertOne({...userInfo, pin: hashedPin});
+      const result = await userCollection.insertOne({
+        ...userInfo,
+        pin: hashedPin,
+      });
       res.send(result);
+    });
+
+    //sign in user - login
+    app.get("/users", async (req, res) => {
+      const { phone, pin } = req?.query;
+      // Find user by username
+      const user = await userCollection.findOne(
+        { phone },
+        { projection: { _id: 0 } }
+      );
+      if (!user) {
+        return res.send({ errorMessage: "Invalid credentials" });
+      }
+      // Compare password with hashed password
+      const isMatch = await bcrypt.compare(pin, user.pin);
+      if (!isMatch) {
+        return res.send({ errorMessage: "Invalid credentials" });
+      }
+      res
+        .status(200)
+        .send({ message: "Login successful", loggedIn: true, user });
+    });
+
+    // jwt
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+      res
+        .cookie("token", token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+        })
+        .send({ success: true });
+    });
+
+    // Logout
+    app.post("/logout", async (req, res) => {
+      try {
+        res
+          .clearCookie("token", {
+            maxAge: 0,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
+          })
+          .send({ success: true });
+        console.log("Logout successful");
+      } catch (err) {
+        res.status(500).send(err);
+      }
+    });
+
+    // get user role
+    app.get("/role/:email", async (req, res) => {
+      const { email } = req?.params;
+      const { role } = await userCollection.findOne({ email });
+      res.send(role);
     });
 
     // Send a ping to confirm a successful connection
