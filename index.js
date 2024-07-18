@@ -305,7 +305,7 @@ async function run() {
     });
 
     //decline cash in request
-    app.put("/rejectCashIn/:id", async (req, res) => {
+    app.put("/rejectCashIn/:id", verifyToken, async (req, res) => {
       const { id } = req?.params;
       const filter = { _id: new ObjectId(id) };
       const updateRejection = {
@@ -318,6 +318,15 @@ async function run() {
         updateRejection
       );
       res.send(result);
+    });
+
+    // get transactions
+    app.get("/transactions/:phone", verifyToken, async (req, res) => {
+      const { phone } = req?.params;
+      const sendMoney = await transactionCollection
+        .find({ $or: [{ sender: phone }, { accountNumber: phone }] })
+        .toArray();
+      res.send(sendMoney);
     });
 
     // Send a ping to confirm a successful connection
