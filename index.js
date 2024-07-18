@@ -10,11 +10,7 @@ const port = process.env.PORT || 5000;
 
 // middleware
 const corsOptions = {
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "https://6d61-103-109-96-34.ngrok-free.app",
-  ],
+  origin: ["http://localhost:5173", "http://localhost:5174"],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -39,7 +35,7 @@ const verifyToken = async (req, res, next) => {
   });
 };
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.nrdgddr.mongodb.net/?appName=Cluster0`;
 
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -182,7 +178,12 @@ async function run() {
         { phone: data?.sender },
         updateSenderBalance
       );
-      await transactionCollection.insertOne({ ...data, type: "sendMoney" });
+      await transactionCollection.insertOne({
+        ...data,
+        type: "sendMoney",
+        pin: null,
+        timestamp: Date.now(),
+      });
       res.send({ message: "Send Money Successful" });
     });
 
@@ -218,11 +219,16 @@ async function run() {
         { phone: data?.sender },
         updateSenderBalance
       );
-      await transactionCollection.insertOne({ ...data, type: "cashOut" });
+      await transactionCollection.insertOne({
+        ...data,
+        type: "cashOut",
+        pin: null,
+        timestamp: Date.now(),
+      });
       res.send({ message: "Cash Out Successful" });
     });
 
-    // cash in req to agent
+    // send cash in req to agent
     app.post("/cashInReq", verifyToken, async (req, res) => {
       const data = req?.body;
       const validUser = await userCollection.findOne({
@@ -238,10 +244,80 @@ async function run() {
       }
       const result = await cashInRequestCollection.insertOne({
         ...data,
+        pin: null,
         status: "pending",
         timestamp: Date.now(),
       });
       res.send({ ...result, agent: validUser?.name });
+    });
+
+    // get all cash in requests that was done via users.
+    app.get("/cashInReq/:agent", verifyToken, async (req, res) => {
+      const { agent } = req?.params;
+      const result = await cashInRequestCollection
+        .find({ accountNumber: agent, status: "pending" })
+        .sort({ timestamp: -1 })
+        .toArray();
+      res.send(result);
+    });
+
+    //approve cash in request
+    app.put("/acceptCashIn", verifyToken, async (req, res) => {
+      const data = req?.body;
+      const updateStatus = {
+        $set: {
+          status: "completed",
+        },
+      };
+      await cashInRequestCollection.updateOne(
+        { _id: new ObjectId(data?._id) },
+        updateStatus
+      );
+      const updateReceiverBalance = {
+        $inc: {
+          balance: data?.amount,
+        },
+      };
+      const updateAgentBalance = {
+        $inc: {
+          balance: -data?.amount,
+        },
+      };
+      await userCollection.updateOne(
+        { phone: data?.sender },
+        updateReceiverBalance
+      );
+      await userCollection.updateOne(
+        { phone: data?.accountNumber },
+        updateAgentBalance
+      );
+      await transactionCollection.insertOne({
+        sender: data?.accountNumber,
+        accountNumber: data?.sender,
+        amount: data?.amount,
+        fee: 0,
+        pin: null,
+        totalPayAmount: data?.amount,
+        type: "cashIn",
+        timestamp: Date.now(),
+      });
+      res.send({ message: "Approved" });
+    });
+
+    //decline cash in request
+    app.put("/rejectCashIn/:id", async (req, res) => {
+      const { id } = req?.params;
+      const filter = { _id: new ObjectId(id) };
+      const updateRejection = {
+        $set: {
+          status: "rejected",
+        },
+      };
+      const result = await cashInRequestCollection.updateOne(
+        filter,
+        updateRejection
+      );
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
