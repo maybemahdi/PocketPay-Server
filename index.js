@@ -190,14 +190,15 @@ async function run() {
     //cash out
     app.put("/cashOut", verifyToken, async (req, res) => {
       const data = req?.body;
-      const validUser = await userCollection.findOne({
+      const validAgent = await userCollection.findOne({
         phone: data?.accountNumber,
         accountType: "agent",
       });
-      if (!validUser) {
+      if (!validAgent) {
         return res.send({ errorMessage: "Enter a valid agent number" });
       }
-      const isMatch = await bcrypt.compare(data?.pin, validUser.pin);
+      const sender = await userCollection.findOne({ phone: data?.sender });
+      const isMatch = await bcrypt.compare(data?.pin, sender?.pin);
       if (!isMatch) {
         return res.send({ errorMessage: "Wrong Pin" });
       }
@@ -231,14 +232,15 @@ async function run() {
     // send cash in req to agent
     app.post("/cashInReq", verifyToken, async (req, res) => {
       const data = req?.body;
-      const validUser = await userCollection.findOne({
+      const validAgent = await userCollection.findOne({
         phone: data?.accountNumber,
         accountType: "agent",
       });
-      if (!validUser) {
+      if (!validAgent) {
         return res.send({ errorMessage: "Enter a valid agent number" });
       }
-      const isMatch = await bcrypt.compare(data?.pin, validUser.pin);
+      const sender = await userCollection.findOne({ phone: data?.sender });
+      const isMatch = await bcrypt.compare(data?.pin, sender?.pin);
       if (!isMatch) {
         return res.send({ errorMessage: "Wrong Pin" });
       }
@@ -248,7 +250,7 @@ async function run() {
         status: "pending",
         timestamp: Date.now(),
       });
-      res.send({ ...result, agent: validUser?.name });
+      res.send({ ...result, agent: validAgent?.name });
     });
 
     // get all cash in requests that was done via users.
