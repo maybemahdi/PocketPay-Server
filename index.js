@@ -21,7 +21,6 @@ app.use(cookieParser());
 // Verify Token Middleware
 const verifyToken = async (req, res, next) => {
   const token = req.cookies?.token;
-  // console.log(token);
   if (!token) {
     return res.status(401).send({ message: "unauthorized access" });
   }
@@ -31,6 +30,7 @@ const verifyToken = async (req, res, next) => {
       return res.status(401).send({ message: "unauthorized access" });
     }
     req.user = decoded;
+    // console.log(decoded);
     next();
   });
 };
@@ -55,6 +55,18 @@ async function run() {
     const userCollection = db.collection("users");
     const transactionCollection = db.collection("transactions");
     const cashInRequestCollection = db.collection("cashInRequests");
+    const notificationCollection = db.collection("notifications");
+
+    // verify admin
+    const verifyAdmin = async (req, res, next) => {
+      const user = req.user;
+      const query = { email: user?.email };
+      const result = await userCollection?.findOne(query);
+      if (!result || result?.role !== "admin") {
+        return res.status(401).send({ message: "unauthorized access!!" });
+      }
+      next();
+    };
 
     //create user - registration
     app.post("/users", async (req, res) => {
@@ -102,6 +114,7 @@ async function run() {
     // jwt
     app.post("/jwt", async (req, res) => {
       const user = req.body;
+      // console.log(user)
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
         expiresIn: "365d",
       });
@@ -329,6 +342,35 @@ async function run() {
         .find({ $or: [{ sender: phone }, { accountNumber: phone }] })
         .toArray();
       res.send(sendMoney);
+    });
+
+    //get all users for admin
+    app.get("/api/allUser", verifyToken, verifyAdmin, async (req, res) => {
+      const users = await userCollection.find().toArray();
+      res.send(users);
+    });
+
+    //verify user (agent) by admin
+    app.patch("/api/verifyStatus/:id", async (req, res) => {
+      const { id } = req?.params;
+      const filter = { _id: new ObjectId(id) };
+      const updateStatus = {
+        $set: {
+          status: "verified",
+        },
+      };
+      const result = await userCollection.updateOne(filter, updateStatus);
+      res.send(result);
+    });
+
+    //get notification for all users
+    app.get("/api/notifications/:phone", async (req, res) => {
+      const { phone } = req?.params;
+      const notifications = await notificationCollection
+        .find({ phone, markAsRead: false })
+        .sort({ time: -1 })
+        .toArray();
+      res.send(notifications);
     });
 
     // Send a ping to confirm a successful connection
