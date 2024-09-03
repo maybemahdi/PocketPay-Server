@@ -8,6 +8,8 @@ const jwt = require("jsonwebtoken");
 
 const port = process.env.PORT || 5000;
 
+const sendMail = require("./mailService");
+
 // middleware
 const corsOptions = {
   origin: ["http://localhost:5173", "http://localhost:5174"],
@@ -85,6 +87,12 @@ async function run() {
         ...userInfo,
         pin: hashedPin,
       });
+
+      sendMail(userInfo?.email, {
+        subject: "Welcome to PocketPay Instant Banking",
+        message: `Thank You joining to the fastest MFS of the region, Hope you will enjoy our services. Have A good Time!`,
+      });
+
       res.send(result);
     });
 
@@ -197,6 +205,24 @@ async function run() {
         pin: null,
         timestamp: Date.now(),
       });
+
+      const { email: senderEmail } = await userCollection?.findOne({
+        phone: data?.sender,
+      });
+      const { email: receiverEmail } = await userCollection?.findOne({
+        phone: data?.accountNumber,
+      });
+
+      sendMail(senderEmail, {
+        subject: `Send Money to ${data?.accountNumber}`,
+        message: `You successfully sent ${data?.amount} BDT to ${data?.accountNumber}`,
+      });
+
+      sendMail(receiverEmail, {
+        subject: `Received Money from ${data?.sender}`,
+        message: `You successfully received ${data?.amount} BDT from ${data?.sender}`,
+      });
+
       res.send({ message: "Send Money Successful" });
     });
 
@@ -239,6 +265,24 @@ async function run() {
         pin: null,
         timestamp: Date.now(),
       });
+
+      const { email: senderEmail } = await userCollection?.findOne({
+        phone: data?.sender,
+      });
+      const { email: receiverEmail } = await userCollection?.findOne({
+        phone: data?.accountNumber,
+      });
+
+      sendMail(senderEmail, {
+        subject: `Cash out Approved to Agent ${data?.accountNumber}`,
+        message: `You successfully cash outed ${data?.amount} BDT to ${data?.accountNumber}`,
+      });
+
+      sendMail(receiverEmail, {
+        subject: `Received Money from ${data?.sender}`,
+        message: `You successfully received Cash Out ${data?.amount} BDT from Agent ${data?.sender}`,
+      });
+
       res.send({ message: "Cash Out Successful" });
     });
 
@@ -360,6 +404,13 @@ async function run() {
         },
       };
       const result = await userCollection.updateOne(filter, updateStatus);
+
+      const { email: senderEmail } = await userCollection?.findOne(filter);
+      sendMail(senderEmail, {
+        subject: `Your Agent Verification Update`,
+        message: `You are a Verified Agent Now! Just Login To Your Account to get Your Login Bonus as an Agent`,
+      });
+
       res.send(result);
     });
 
@@ -367,10 +418,99 @@ async function run() {
     app.get("/api/notifications/:phone", async (req, res) => {
       const { phone } = req?.params;
       const notifications = await notificationCollection
-        .find({ phone, markAsRead: false })
+        .find({ phone })
         .sort({ time: -1 })
         .toArray();
       res.send(notifications);
+    });
+
+    //mark notification as read
+    app.patch(
+      "/api/notification/markAsRead/:id",
+      verifyToken,
+      async (req, res) => {
+        const { id } = req?.params;
+        const { status } = req?.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateMarkAsRead = {
+          $set: {
+            markAsRead: status === "read",
+          },
+        };
+        const result = await notificationCollection.updateOne(
+          filter,
+          updateMarkAsRead
+        );
+        res.send(result);
+      }
+    );
+
+    // update email
+    app.patch("/api/updateEmail", verifyToken, async (req, res) => {
+      const { currentEmail, newEmail, pin } = req?.body;
+      const isExist = await userCollection?.findOne({ email: currentEmail });
+      if (!isExist) {
+        return res.status(401).send({ message: "Unauthorized Access" });
+      }
+
+      const newEmailAlreadyRegistered = await userCollection?.findOne({
+        email: newEmail,
+      });
+      if (newEmailAlreadyRegistered) {
+        return res
+          .status(409)
+          .send({ message: "Your New Email is Already Registered" });
+      }
+
+      // Compare password with hashed password
+      const isMatch = await bcrypt.compare(pin, isExist.pin);
+      if (!isMatch) {
+        return res.status(401).send({ message: "Invalid credentials" });
+      }
+
+      const updateEmail = {
+        $set: {
+          email: newEmail,
+        },
+      };
+      const result = await userCollection?.updateOne(isExist, updateEmail);
+      
+      sendMail(newEmail, {
+        subject: `Pocket Pay New Email Update`,
+        message: `You successfully Updated your PocketPay Email. The Past One was ${currentEmail}`,
+      });
+      sendMail(currentEmail, {
+        subject: `Pocket Pay Email Changed`,
+        message: `You successfully Changed your PocketPay Email. The new Email is ${newEmail}. If you think someone hacked your account then Contact PocketPay Support Email mh7266391@gmail.com ASAP`,
+      });
+
+      res.send(result);
+    });
+
+    // delete user (for admin)
+    app.delete(
+      "/api/deleteUser/:email",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const { email } = req?.params;
+        const result = await userCollection?.deleteOne({ email });
+
+
+        sendMail(email, {
+          subject: `PocketPay Account Update`,
+          message: `Your PocketPay Account has been deleted by Authority, If you did nothing wrong then contact mh7266391@gmail.com ASAP`,
+        });
+
+        res.send(result);
+      }
+    );
+
+    // get notify on registering for (signing bonus)
+    app.post("/api/addNotification", async (req, res) => {
+      const notification = req?.body;
+      const result = await notificationCollection.insertOne(notification);
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
@@ -386,7 +526,7 @@ async function run() {
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Hello from PocketPay Server..");
+  res.send("Hello from PocketPay Server...");
 });
 
 app.listen(port, () => {
