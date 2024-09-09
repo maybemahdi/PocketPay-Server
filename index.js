@@ -12,7 +12,7 @@ const sendMail = require("./mailService");
 
 // middleware
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://localhost:5174"],
+  origin: ["http://localhost:5173", "http://localhost:5174", "https://pocket-pay-client.vercel.app"],
   credentials: true,
   optionSuccessStatus: 200,
 };
@@ -90,7 +90,7 @@ async function run() {
 
       sendMail(userInfo?.email, {
         subject: "Welcome to PocketPay Instant Banking",
-        message: `Thank You joining to the fastest MFS of the region, Hope you will enjoy our services. Have A good Time!`,
+        message: `Thank You for joining to the fastest MFS of the region, Hope you will enjoy our services. Have A good Time!`,
       });
 
       res.send(result);
